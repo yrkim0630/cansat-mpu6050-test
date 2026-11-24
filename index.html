@@ -1,0 +1,598 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MPU6050 USB 로켓 자세 시뮬레이터</title>
+  <style>
+    :root {
+      --bg: #070b16;
+      --panel: #10182d;
+      --panel-2: #17223f;
+      --border: rgba(148, 163, 184, 0.2);
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --ok: #34d399;
+      --warn: #fbbf24;
+      --danger: #fb7185;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans KR", sans-serif;
+      background: radial-gradient(circle at 50% 15%, rgba(56, 189, 248, 0.14), transparent 45%), var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    header {
+      padding: 14px 20px;
+      border-bottom: 1px solid var(--border);
+      background: rgba(10, 15, 28, 0.85);
+      backdrop-filter: blur(10px);
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .title-wrap h1 {
+      font-size: 1.1rem;
+      font-weight: 700;
+    }
+
+    .title-wrap p {
+      font-size: 0.82rem;
+      color: var(--muted);
+    }
+
+    .controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }
+
+    button {
+      border: 1px solid var(--border);
+      background: var(--panel-2);
+      color: var(--text);
+      padding: 8px 14px;
+      border-radius: 9px;
+      font-size: 0.88rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: 0.18s ease;
+    }
+
+    button:hover:not(:disabled) {
+      border-color: var(--accent);
+      transform: translateY(-1px);
+    }
+
+    button:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+
+    button.primary {
+      background: var(--accent);
+      color: #05101e;
+      border-color: var(--accent);
+    }
+
+    .status-pill {
+      font-size: 0.8rem;
+      padding: 5px 10px;
+      border-radius: 999px;
+      background: rgba(251, 191, 36, 0.14);
+      color: var(--warn);
+      border: 1px solid rgba(251, 191, 36, 0.3);
+    }
+
+    .status-pill.connected {
+      background: rgba(52, 211, 153, 0.15);
+      color: var(--ok);
+      border-color: rgba(52, 211, 153, 0.35);
+    }
+
+    main {
+      flex: 1;
+      max-width: 1140px;
+      width: 100%;
+      margin: 0 auto;
+      padding: 20px;
+      display: grid;
+      grid-template-columns: 1.35fr 0.85fr;
+      gap: 18px;
+    }
+
+    @media (max-width: 880px) {
+      main { grid-template-columns: 1fr; }
+    }
+
+    .stage {
+      background: linear-gradient(180deg, #0b1224 0%, #070b16 100%);
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      min-height: 460px;
+      position: relative;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      perspective: 900px;
+    }
+
+    .grid-floor {
+      position: absolute;
+      inset: 0;
+      background-image:
+        linear-gradient(to right, rgba(148, 163, 184, 0.06) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(148, 163, 184, 0.06) 1px, transparent 1px);
+      background-size: 36px 36px;
+      pointer-events: none;
+    }
+
+    .hud-top {
+      position: absolute;
+      top: 14px;
+      left: 14px;
+      right: 14px;
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      font-size: 0.8rem;
+      color: var(--muted);
+      pointer-events: none;
+    }
+
+    /* 로켓 3D 컨테이너 */
+    .rocket-scene {
+      width: 180px;
+      height: 300px;
+      transform-style: preserve-3d;
+      transition: transform 0.05s linear;
+      position: relative;
+    }
+
+    .rocket-body {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      transform-style: preserve-3d;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .nose-cone {
+      width: 0;
+      height: 0;
+      border-left: 34px solid transparent;
+      border-right: 34px solid transparent;
+      border-bottom: 72px solid #f43f5e;
+      filter: drop-shadow(0 0 12px rgba(244, 63, 94, 0.35));
+    }
+
+    .fuselage {
+      width: 68px;
+      height: 145px;
+      background: linear-gradient(90deg, #cbd5e1 0%, #f8fafc 45%, #94a3b8 100%);
+      border-radius: 6px;
+      position: relative;
+      box-shadow: inset 0 0 12px rgba(15, 23, 42, 0.25);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .window {
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      background: radial-gradient(circle at 30% 30%, #7dd3fc, #0284c7);
+      border: 4px solid #334155;
+    }
+
+    .fin {
+      position: absolute;
+      bottom: 6px;
+      width: 34px;
+      height: 54px;
+      background: linear-gradient(135deg, #fb7185, #e11d48);
+    }
+
+    .fin.left {
+      left: -30px;
+      clip-path: polygon(100% 0, 100% 100%, 0 100%);
+    }
+
+    .fin.right {
+      right: -30px;
+      clip-path: polygon(0 0, 0 100%, 100% 100%);
+    }
+
+    .nozzle {
+      width: 44px;
+      height: 20px;
+      background: #334155;
+      border-bottom-left-radius: 8px;
+      border-bottom-right-radius: 8px;
+    }
+
+    .flame {
+      width: 28px;
+      height: 56px;
+      margin-top: -2px;
+      background: linear-gradient(180deg, #fef08a 0%, #fb923c 55%, rgba(239, 68, 68, 0) 100%);
+      border-radius: 0 0 20px 20px;
+      filter: blur(1px);
+      transform-origin: top center;
+      animation: flicker 0.14s infinite alternate;
+    }
+
+    @keyframes flicker {
+      from { transform: scaleY(0.85) scaleX(0.95); opacity: 0.85; }
+      to { transform: scaleY(1.15) scaleX(1.05); opacity: 1; }
+    }
+
+    .sidebar {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 16px;
+    }
+
+    .card h2 {
+      font-size: 0.98rem;
+      margin-bottom: 10px;
+    }
+
+    .telemetry-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+      margin-bottom: 10px;
+    }
+
+    .metric {
+      background: var(--panel-2);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 10px;
+    }
+
+    .metric .label {
+      font-size: 0.75rem;
+      color: var(--muted);
+    }
+
+    .metric .val {
+      font-size: 1.05rem;
+      font-weight: 700;
+      margin-top: 2px;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .log-box {
+      background: #060913;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 10px;
+      height: 130px;
+      overflow-y: auto;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.78rem;
+      color: #cbd5e1;
+      white-space: pre-line;
+    }
+
+    .tip {
+      font-size: 0.82rem;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="title-wrap">
+      <h1>🚀 MPU6050 × USB 로켓 자세 제어 시뮬레이터</h1>
+      <p>Chrome / Edge 등 Web Serial API 지원 브라우저에서 USB 시리얼(9600 baud)로 연결하세요</p>
+    </div>
+    <div class="controls">
+      <span id="statusPill" class="status-pill">연결 안 됨</span>
+      <button id="connectBtn" class="primary">USB 연결</button>
+      <button id="disconnectBtn" disabled>연결 해제</button>
+      <button id="zeroBtn">영점 보정(Zero)</button>
+      <button id="demoBtn">테스트 모드</button>
+    </div>
+  </header>
+
+  <main>
+    <section class="stage">
+      <div class="grid-floor"></div>
+      <div class="hud-top">
+        <span id="modeLabel">MODE: 대기 중</span>
+        <span id="angleHud">Pitch: 0.0° | Roll: 0.0° | Yaw: 0.0°</span>
+      </div>
+
+      <div id="rocketScene" class="rocket-scene">
+        <div class="rocket-body">
+          <div class="nose-cone"></div>
+          <div class="fuselage">
+            <div class="window"></div>
+            <div class="fin left"></div>
+            <div class="fin right"></div>
+          </div>
+          <div class="nozzle"></div>
+          <div id="flame" class="flame"></div>
+        </div>
+      </div>
+    </section>
+
+    <aside class="sidebar">
+      <div class="card">
+        <h2>가속도 센서 (g)</h2>
+        <div class="telemetry-grid">
+          <div class="metric"><div class="label">ACC X</div><div id="axVal" class="val">0.00</div></div>
+          <div class="metric"><div class="label">ACC Y</div><div id="ayVal" class="val">0.00</div></div>
+          <div class="metric"><div class="label">ACC Z</div><div id="azVal" class="val">1.00</div></div>
+        </div>
+
+        <h2>자이로 센서 (°/s)</h2>
+        <div class="telemetry-grid">
+          <div class="metric"><div class="label">GYR X</div><div id="gxVal" class="val">0.0</div></div>
+          <div class="metric"><div class="label">GYR Y</div><div id="gyVal" class="val">0.0</div></div>
+          <div class="metric"><div class="label">GYR Z</div><div id="gzVal" class="val">0.0</div></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>시리얼 수신 로그</h2>
+        <div id="logBox" class="log-box">준비 완료. [USB 연결]을 누르거나 [테스트 모드]로 먼저 움직임을 확인해 보세요.</div>
+      </div>
+
+      <div class="card">
+        <h2>사용 팁</h2>
+        <p class="tip">
+          • <strong>Web Serial API</strong>는 HTTPS 또는 <code>localhost</code>(GitHub Pages는 자동 HTTPS)에서 동작합니다.<br />
+          • 센서 기울기 각도(Pitch/Roll)와 자이로 Z축 회전(Yaw)을 상보 필터로 합쳐 로켓 자세에 반영합니다.<br />
+          • 센서를 평평하게 둔 상태에서 <strong>영점 보정(Zero)</strong>을 누르면 현재 자세를 0° 기준으로 맞춥니다.
+        </p>
+      </div>
+    </aside>
+  </main>
+
+  <script>
+    const connectBtn = document.getElementById('connectBtn');
+    const disconnectBtn = document.getElementById('disconnectBtn');
+    const zeroBtn = document.getElementById('zeroBtn');
+    const demoBtn = document.getElementById('demoBtn');
+    const statusPill = document.getElementById('statusPill');
+    const modeLabel = document.getElementById('modeLabel');
+    const angleHud = document.getElementById('angleHud');
+    const rocketScene = document.getElementById('rocketScene');
+    const flame = document.getElementById('flame');
+    const logBox = document.getElementById('logBox');
+
+    const els = {
+      ax: document.getElementById('axVal'),
+      ay: document.getElementById('ayVal'),
+      az: document.getElementById('azVal'),
+      gx: document.getElementById('gxVal'),
+      gy: document.getElementById('gyVal'),
+      gz: document.getElementById('gzVal'),
+    };
+
+    let port = null;
+    let reader = null;
+    let keepReading = false;
+    let readLoopPromise = null;
+    let lineBuffer = '';
+
+    // 자세 추정 상태
+    let pitch = 0, roll = 0, yaw = 0;
+    let offsetPitch = 0, offsetRoll = 0, offsetYaw = 0;
+    let lastTime = performance.now();
+    let demoTimer = null;
+
+    function appendLog(msg) {
+      const lines = logBox.textContent.split('\n');
+      lines.push(msg);
+      if (lines.length > 40) lines.shift();
+      logBox.textContent = lines.join('\n');
+      logBox.scrollTop = logBox.scrollHeight;
+    }
+
+    function setConnectedState(connected) {
+      connectBtn.disabled = connected;
+      disconnectBtn.disabled = !connected;
+      statusPill.textContent = connected ? 'USB 연결됨' : '연결 안 됨';
+      statusPill.classList.toggle('connected', connected);
+      modeLabel.textContent = connected ? 'MODE: USB 시리얼 수신 중' : 'MODE: 대기 중';
+    }
+
+    function updateRocketTransform() {
+      const p = (pitch - offsetPitch);
+      const r = (roll - offsetRoll);
+      const y = (yaw - offsetYaw);
+
+      rocketScene.style.transform =
+        `rotateX(${(-p).toFixed(1)}deg) rotateZ(${r.toFixed(1)}deg) rotateY(${y.toFixed(1)}deg)`;
+
+      angleHud.textContent =
+        `Pitch: ${p.toFixed(1)}° | Roll: ${r.toFixed(1)}° | Yaw: ${y.toFixed(1)}°`;
+    }
+
+    function processSensorSample(ax, ay, az, gx, gy, gz) {
+      const now = performance.now();
+      const dt = Math.min((now - lastTime) / 1000, 0.1);
+      lastTime = now;
+
+      // 가속도 기반 기울기(deg)
+      const accPitch = Math.atan2(ay, Math.hypot(ax, az)) * (180 / Math.PI);
+      const accRoll  = Math.atan2(-ax, Math.hypot(ay, az)) * (180 / Math.PI);
+
+      // 상보 필터 (자이로 적분 + 가속도 보정)
+      const alpha = 0.96;
+      pitch = alpha * (pitch + gx * dt) + (1 - alpha) * accPitch;
+      roll  = alpha * (roll  + gy * dt) + (1 - alpha) * accRoll;
+      yaw  += gz * dt;
+
+      // 추력 불꽃 길이 반응(가속도 크기 기반)
+      const gMag = Math.hypot(ax, ay, az);
+      const thrustScale = Math.max(0.5, Math.min(2.2, gMag));
+      flame.style.height = `${Math.round(45 * thrustScale)}px`;
+
+      els.ax.textContent = ax.toFixed(2);
+      els.ay.textContent = ay.toFixed(2);
+      els.az.textContent = az.toFixed(2);
+      els.gx.textContent = gx.toFixed(1);
+      els.gy.textContent = gy.toFixed(1);
+      els.gz.textContent = gz.toFixed(1);
+
+      updateRocketTransform();
+    }
+
+    // "ACC[g] X:0.01 Y:-0.02 Z:1.00 | GYR[deg/s] X:0.2 Y:-0.1 Z:0.0" 형태 파싱
+    function parseLine(line) {
+      const m = line.match(
+        /X:\s*([-\d.]+)\s+Y:\s*([-\d.]+)\s+Z:\s*([-\d.]+).*?X:\s*([-\d.]+)\s+Y:\s*([-\d.]+)\s+Z:\s*([-\d.]+)/i
+      );
+      if (!m) return false;
+      const ax = parseFloat(m[1]);
+      const ay = parseFloat(m[2]);
+      const az = parseFloat(m[3]);
+      const gx = parseFloat(m[4]);
+      const gy = parseFloat(m[5]);
+      const gz = parseFloat(m[6]);
+      if ([ax, ay, az, gx, gy, gz].some(Number.isNaN)) return false;
+
+      processSensorSample(ax, ay, az, gx, gy, gz);
+      return true;
+    }
+
+    async function readSerialLoop() {
+      const decoder = new TextDecoder();
+      while (port && port.readable && keepReading) {
+        reader = port.readable.getReader();
+        try {
+          while (keepReading) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            if (value) {
+              lineBuffer += decoder.decode(value, { stream: true });
+              const parts = lineBuffer.split(/\r?\n/);
+              lineBuffer = parts.pop() || '';
+              for (const rawLine of parts) {
+                const clean = rawLine.trim();
+                if (!clean) continue;
+                if (!parseLine(clean)) {
+                  appendLog(clean);
+                }
+              }
+            }
+          }
+        } catch (err) {
+          if (keepReading) appendLog('수신 오류: ' + err.message);
+        } finally {
+          reader.releaseLock();
+          reader = null;
+        }
+      }
+    }
+
+    connectBtn.addEventListener('click', async () => {
+      if (!('serial' in navigator)) {
+        alert('이 브라우저는 Web Serial API를 지원하지 않습니다. Chrome 또는 Edge를 사용해 주세요.');
+        return;
+      }
+      stopDemo();
+      try {
+        port = await navigator.serial.requestPort();
+        await port.open({ baudRate: 9600 });
+        keepReading = true;
+        lastTime = performance.now();
+        setConnectedState(true);
+        appendLog('USB 시리얼 포트 연결 성공 (9600 baud)');
+        readLoopPromise = readSerialLoop();
+      } catch (err) {
+        appendLog('연결 취소 또는 실패: ' + err.message);
+      }
+    });
+
+    disconnectBtn.addEventListener('click', async () => {
+      keepReading = false;
+      try {
+        if (reader) await reader.cancel();
+        if (readLoopPromise) await readLoopPromise;
+        if (port) await port.close();
+      } catch (err) {
+        appendLog('해제 중 알림: ' + err.message);
+      } finally {
+        reader = null;
+        port = null;
+        readLoopPromise = null;
+        setConnectedState(false);
+        appendLog('USB 연결이 해제되었습니다.');
+      }
+    });
+
+    zeroBtn.addEventListener('click', () => {
+      offsetPitch = pitch;
+      offsetRoll = roll;
+      offsetYaw = yaw;
+      updateRocketTransform();
+      appendLog('현재 자세를 영점(0°)으로 보정했습니다.');
+    });
+
+    function stopDemo() {
+      if (demoTimer) {
+        clearInterval(demoTimer);
+        demoTimer = null;
+        demoBtn.textContent = '테스트 모드';
+      }
+    }
+
+    demoBtn.addEventListener('click', () => {
+      if (demoTimer) {
+        stopDemo();
+        modeLabel.textContent = 'MODE: 대기 중';
+        return;
+      }
+      if (port) {
+        appendLog('실제 USB 연결 중에는 테스트 모드를 켜지 않는 것을 권장합니다.');
+        return;
+      }
+      lastTime = performance.now();
+      modeLabel.textContent = 'MODE: 가상 비행 테스트';
+      demoBtn.textContent = '테스트 중지';
+      let t = 0;
+      demoTimer = setInterval(() => {
+        t += 0.06;
+        const ax = Math.sin(t) * 0.45;
+        const ay = Math.cos(t * 0.8) * 0.35;
+        const az = 1.0 + Math.sin(t * 2) * 0.25;
+        const gx = Math.cos(t) * 18;
+        const gy = -Math.sin(t * 0.8) * 15;
+        const gz = 12;
+        processSensorSample(ax, ay, az, gx, gy, gz);
+      }, 50);
+    });
+  </script>
+</body>
+</html>
